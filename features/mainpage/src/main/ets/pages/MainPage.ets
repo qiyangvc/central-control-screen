@@ -47,6 +47,7 @@ export struct MainPage {
   @State weatherIcon: string = 'sun';
   @State isDarkMode: boolean = false;
   @State currentBreakpoint: string = 'md';
+  @StorageProp('currentUserId') currentUserId: number = 1;
   private timerId: number = -1;
   private context = getContext(this) as common.UIAbilityContext;
 
@@ -62,7 +63,7 @@ export struct MainPage {
       // 传入添加回调
       onAdd: (key: string) => {
         // 核心逻辑：往数组里 push 一个 key，界面自动刷新
-        if (this.displayedCards.length < 6) {
+        if (this.displayedCards.length < 12) {
           this.displayedCards.push(key);
         }
       }
@@ -101,8 +102,8 @@ export struct MainPage {
   }
 
   async refreshData() {
-    this.energyData = await HomeDataService.getEnergyData();
-    this.networkData = await HomeDataService.getNetworkData();
+    this.energyData = await HomeDataService.getEnergyData(this.currentUserId);
+    this.networkData = await HomeDataService.getNetworkData(this.currentUserId);
     const w: WeatherData = HomeDataService.getWeatherData();
     const t = Math.round(w.tempC);
     this.weatherTempText = `${isNaN(t) ? 0 : t}°C`;
@@ -276,8 +277,8 @@ export struct MainPage {
             .borderRadius(14)
             .onClick(async () => {
               // 1. 模拟写入数据
-              await HomeDataService.simulateData();
-              await HealthDataService.simulateData();
+              await HomeDataService.simulateData(this.currentUserId);
+              await HealthDataService.simulateData(this.currentUserId);
               
               // 2. 刷新界面
               this.refreshData();
@@ -397,12 +398,12 @@ export struct MainPage {
                   .border({ width: 0.5, color: 'rgba(255, 255, 255, 0.2)' })
                   .borderRadius(16)
                   .width('100%')
-                  .height(this.currentBreakpoint === 'sm' ? 180 : '100%') // 手机模式下给个固定高度，平板模式下撑满
+                  .height(180) // 统一高度，允许滚动
                 }
               }, (key: string) => key)
 
               // 2. 渲染“添加”按钮
-              if (this.displayedCards.length < 6) {
+              if (this.displayedCards.length < 12) {
                 GridItem() {
                   Button() {
                     Column() {
@@ -415,7 +416,7 @@ export struct MainPage {
                   .border({ width: 1, color: 'rgba(255, 255, 255, 0.1)', style: BorderStyle.Dashed })
                   .borderRadius(16)
                   .width('100%')
-                  .height(this.currentBreakpoint === 'sm' ? 180 : '100%')
+                  .height(180) // 统一高度
                   .onClick(() => {
                     this.dialogController.open()
                   })
@@ -424,10 +425,10 @@ export struct MainPage {
 
             }
             .columnsTemplate('1fr 1fr')
-            .rowsTemplate(this.currentBreakpoint === 'sm' ? undefined : '1fr 1fr 1fr') // 手机模式下不固定行数，允许滚动
+            // .rowsTemplate(this.currentBreakpoint === 'sm' ? undefined : '1fr 1fr 1fr') // 移除固定行数限制
             .rowsGap(15)
             .columnsGap(15)
-            .height(this.currentBreakpoint === 'sm' ? undefined : '100%') // 手机模式下高度自适应
+            // .height(this.currentBreakpoint === 'sm' ? undefined : '100%') // 移除高度限制，让其自适应内容
           }
 
         }

@@ -21,6 +21,7 @@ export interface ForumPost {
   tags: string[]; // Changed to string[]
   type: number; // 0图文 1视频
   like_count: number;
+  fav_count?: number; // 收藏数
   view_count: number;
   author_name: string;
   author_avatar: string;

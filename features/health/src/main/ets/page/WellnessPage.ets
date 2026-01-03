@@ -43,6 +43,7 @@ export struct WellnessPage {
   onHealthDataUpdate() {
     console.info('WellnessPage: 监听到数据更新通知，无需操作，AppStorage已自动同步');
     // 移除 loadHealthData 调用，完全信任 AppStorage 的直接更新
+    this.uiRefresher++; // 强制刷新 UI，确保列表视图也能及时更新
   }
 
   aboutToAppear() {
@@ -259,7 +260,7 @@ export struct WellnessPage {
                   // .height(320) // 移除固定高度，让其自适应
 
                   // 2. 状态显示 + 一键呼叫 (复用原有逻辑，但调整布局)
-                  Column() {
+                  Column({ space: 15 }) {
                      // 用户身高体重信息
                      Column() {
                         Column({ space: 20 }) {
@@ -301,9 +302,6 @@ export struct WellnessPage {
                      .height(180)   // 放大高度
                      .margin({ top: 10, bottom: 10 }) // 可选：如果觉得太挤，可以加一点外边距
                      
-                     // 空白区域，用于将一键呼叫按钮挤到最下方
-                     Blank().layoutWeight(1)
-
                      // 一键呼叫
                      Button() {
                         Row({ space: 10 }) {

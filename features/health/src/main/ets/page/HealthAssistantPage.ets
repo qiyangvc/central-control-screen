@@ -116,6 +116,13 @@ export struct HealthAssistantPage {
       const store = AppDatabase.getStore();
       if (store) {
         const predicates = new relationalStore.RdbPredicates('house_metrics');
+        
+        // 增加用户ID过滤，防止读取到其他用户的数据
+        const currentUser = AppStorage.get<UserInfo>('currentUser');
+        if (currentUser) {
+          predicates.equalTo('user_id', currentUser.id);
+        }
+        
         predicates.orderByDesc('ts');
         predicates.limitAs(1);
         

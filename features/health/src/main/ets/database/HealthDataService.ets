@@ -13,6 +13,11 @@ class UserInfo {
   constructor() {}
 }
 
+export class UserGoals {
+  steps: number = 10000;
+  calories: number = 500;
+}
+
 // 健康数据结构
 export class HealthRecord {
   id: number = 0;
@@ -258,6 +263,33 @@ export class HealthDataService {
     }
   }
 
+  // ⚡️ 内部辅助：获取用户配置的目标
+  private static async getUserProfileGoals(userId: number): Promise<UserGoals | null> {
+    try {
+      const store = AppDatabase.getStore();
+      if (!store) return null;
+      
+      const predicates = new relationalStore.RdbPredicates('user_profile');
+      predicates.equalTo('user_id', userId);
+      const rs = await store.query(predicates);
+      
+      let result: UserGoals | null = null;
+      if (rs.goToFirstRow()) {
+        const idxSteps = rs.getColumnIndex('target_steps');
+        const idxCals = rs.getColumnIndex('target_calories');
+        if (idxSteps !== -1 && idxCals !== -1) {
+            result = new UserGoals();
+            result.steps = rs.getLong(idxSteps) || 10000;
+            result.calories = rs.getLong(idxCals) || 500;
+        }
+      }
+      rs.close();
+      return result;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // 保持原有接口函数名 - 保存运动数据
   static async saveSportsData(data: HealthRecord): Promise<void> {
     try {
@@ -284,6 +316,15 @@ export class HealthDataService {
         await store.update(valueBucket, predicates);
         console.info(`HealthDataService: 用户${HealthDataService.currentUserId}的运动数据更新成功`);
       } else {
+        // ⚡️ 插入新记录前，尝试应用用户设定的全局目标
+        // 只有当传入的目标值是默认值时才覆盖，避免覆盖用户手动修改的单日目标
+        // (这里简化处理：如果是新插入，优先使用全局配置)
+        const profileGoals = await HealthDataService.getUserProfileGoals(HealthDataService.currentUserId);
+        if (profileGoals) {
+            valueBucket['steps_goal'] = profileGoals.steps;
+            valueBucket['calories_goal'] = profileGoals.calories;
+        }
+
         // 插入新记录
         await store.insert('health_daily', valueBucket);
         console.info(`HealthDataService: 用户${HealthDataService.currentUserId}的运动数据保存成功`);
@@ -291,6 +332,45 @@ export class HealthDataService {
     } catch (error) {
       console.error('HealthDataService: 保存运动数据失败', error);
       throw new Error(`保存运动数据失败: ${JSON.stringify(error)}`);
+    }
+  }
+
+  // ⚡️ 新增：更新每日目标
+  static async updateDailyGoals(date: string, stepsGoal: number, caloriesGoal: number): Promise<void> {
+    try {
+      HealthDataService.ensureInitialized();
+      const store = AppDatabase.getStore();
+      if (!store) return;
+
+      const userId = HealthDataService.currentUserId;
+      
+      // 检查是否存在记录
+      const existing = await HealthDataService.getHealthDataByDate(date);
+      
+      if (existing) {
+        const values: relationalStore.ValuesBucket = {
+          'steps_goal': stepsGoal,
+          'calories_goal': caloriesGoal,
+          'updated_at': new Date().toISOString()
+        };
+        const predicates = new relationalStore.RdbPredicates('health_daily');
+        predicates.equalTo('user_id', userId);
+        predicates.equalTo('date', date);
+        await store.update(values, predicates);
+      } else {
+        // 如果不存在，创建一个新的，但需要注意其他字段默认为0
+        const values: relationalStore.ValuesBucket = {
+          'user_id': userId,
+          'date': date,
+          'steps_goal': stepsGoal,
+          'calories_goal': caloriesGoal,
+          'updated_at': new Date().toISOString()
+        };
+        await store.insert('health_daily', values);
+      }
+      console.info(`HealthDataService: Updated goals for user ${userId} on ${date}`);
+    } catch (e) {
+      console.error('HealthDataService: updateDailyGoals failed', e);
     }
   }
 
@@ -797,8 +877,11 @@ export class HealthDataService {
   }
 
   // 模拟数据更新 (新增)
-  static async simulateData(): Promise<void> {
+  static async simulateData(userId?: number): Promise<void> {
     try {
+      if (userId !== undefined) {
+        HealthDataService.currentUserId = userId;
+      }
       HealthDataService.ensureInitialized();
       
       // 1. 获取今日数据

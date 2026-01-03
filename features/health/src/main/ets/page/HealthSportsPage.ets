@@ -23,6 +23,8 @@ interface UISportsData {
   tempDateStr: string;
   stepsProgressStr: string;
   kcalProgressStr: string;
+  deepSleepStr: string;
+  lightSleepStr: string;
 }
 
 @Entry({ routeName: 'HealthSportsPage' })
@@ -30,6 +32,10 @@ interface UISportsData {
 export struct HealthSportsPage {
   // 监听全局数据更新事件 (由 HealthDataEditPage 触发)
   @StorageProp('HealthDataLastUpdate') @Watch('onHealthDataUpdate') lastUpdate: number = 0;
+  
+  // ⚡️ 接收来自个人信息页面的目标设置
+  @StorageProp('targetSteps') @Watch('loadData') targetSteps: number = 10000;
+  @StorageProp('targetCalories') @Watch('loadData') targetCalories: number = 500;
 
   @State ui: UISportsData = {
     stepsStr: '--',
@@ -50,7 +56,9 @@ export struct HealthSportsPage {
     spo2DateStr: '--/--',
     tempDateStr: '--/--',
     stepsProgressStr: '0/10000',
-    kcalProgressStr: '0/500'
+    kcalProgressStr: '0/500',
+    deepSleepStr: '-- h',
+    lightSleepStr: '-- h'
   };
 
   // 当监听到数据更新时，自动重新加载数据
@@ -80,7 +88,8 @@ export struct HealthSportsPage {
       console.info('运动数据:', JSON.stringify(sportsData));
 
       const currentSteps = sportsData.steps?.current || 0;
-      const goalSteps = sportsData.steps?.goal || 10000;
+      // ⚡️ 使用全局设置的目标步数
+      const goalSteps = this.targetSteps || sportsData.steps?.goal || 10000;
 
       this.ui.stepsStr = currentSteps.toString();
       this.ui.stepsPercent = (currentSteps / goalSteps) * 100;
@@ -88,7 +97,8 @@ export struct HealthSportsPage {
       this.ui.distanceStr = (sportsData.steps?.distance || 0).toFixed(1) + ' km';
 
       const currentKcal = sportsData.calories?.current || 0;
-      const goalKcal = sportsData.calories?.goal || 500;
+      // ⚡️ 使用全局设置的目标热量
+      const goalKcal = this.targetCalories || sportsData.calories?.goal || 500;
 
       this.ui.kcalStr = currentKcal.toString();
       this.ui.kcalPercent = (currentKcal / goalKcal) * 100;
@@ -106,8 +116,11 @@ export struct HealthSportsPage {
 
       const sleepTotal = healthData.sleep.totalSleep || 0;
       const sleepDeep = healthData.sleep.deepSleep || 0;
+      const sleepLight = healthData.sleep.lightSleep || 0;
       const sleepValue = sleepTotal > 0 ? sleepTotal : sleepDeep;
       this.ui.sleepStr = sleepValue.toFixed(1) + ' h';
+      this.ui.deepSleepStr = sleepDeep.toFixed(1) + ' h';
+      this.ui.lightSleepStr = sleepLight.toFixed(1) + ' h';
 
       this.ui.bloodPressureStr = `${healthData.bloodPressure.systolic}/${healthData.bloodPressure.diastolic} mmHg`;
       this.ui.spo2Str = (healthData.bloodOxygen.spo2 || 0) + ' %';
@@ -234,7 +247,9 @@ export struct HealthSportsPage {
             { title: '心率', value: this.ui.heartRateStr, date: this.ui.heartDateStr, icon: $r('app.media.icon_heart_rate'), color: '#FF375F', key: 'heart' },
             { title: '血压', value: this.ui.bloodPressureStr, date: this.ui.bpDateStr, icon: $r('app.media.icon_bloodpressure'), color: '#5E5CE6', key: 'bp' },
             { title: '血氧', value: this.ui.spo2Str, date: this.ui.spo2DateStr, icon: $r('app.media.icon_blood_oxygen'), color: '#64D2FF', key: 'spo2' },
-            { title: '体温', value: this.ui.tempStr, date: this.ui.tempDateStr, icon: $r('app.media.icon_body_temperature'), color: '#FFD60A', key: 'temp' }
+            { title: '体温', value: this.ui.tempStr, date: this.ui.tempDateStr, icon: $r('app.media.icon_body_temperature'), color: '#FFD60A', key: 'temp' },
+            { title: '深睡眠', value: this.ui.deepSleepStr, date: this.ui.sleepDateStr, icon: $r('app.media.icon_sleep_quality'), color: '#5856D6', key: 'deep_sleep' },
+            { title: '浅睡眠', value: this.ui.lightSleepStr, date: this.ui.sleepDateStr, icon: $r('app.media.icon_sleep_quality'), color: '#AF52DE', key: 'light_sleep' }
           ], (item: Record<string, Object>) => {
             GridItem() {
               this.DataCard(item.title as string, item.value as string, item.date as string, item.icon as Resource, item.color as string)

@@ -11,7 +11,9 @@ export struct ProfilePage {
     height: 0,
     weight: 0,
     age: 0,
-    gender: '未知'
+    gender: '未知',
+    targetSteps: 10000,
+    targetCalories: 500
   };
   @State isLoading: boolean = true;
 
@@ -44,6 +46,12 @@ export struct ProfilePage {
         currentUser.name = this.profile.name;
         AppStorage.setOrCreate('currentUser', currentUser);
       }
+      // ⚡️ 通知 HealthSportsPage 刷新数据
+      AppStorage.setOrCreate('HealthDataLastUpdate', Date.now());
+      // ⚡️ 更新全局目标设置 (用于其他页面即时显示)
+      AppStorage.setOrCreate('targetSteps', this.profile.targetSteps);
+      AppStorage.setOrCreate('targetCalories', this.profile.targetCalories);
+      
       router.back();
     } else {
       promptAction.showToast({ message: '保存失败' });
@@ -53,6 +61,7 @@ export struct ProfilePage {
   handleLogout() {
     // 清除登录状态
     AppStorage.setOrCreate('currentUser', undefined);
+    AppStorage.setOrCreate('currentUserId', 0);
     // 返回登录页 (注意：这里假设登录页是入口，或者需要跳转到登录页)
     // 由于我们是 router.push 进来的，最好是 replace 到登录页，或者 back 到主页然后主页判断未登录跳转
     // 简单起见，直接跳转到登录页并清空栈
@@ -123,6 +132,27 @@ export struct ProfilePage {
                 .inputStyle()
                 .fontColor($r('app.color.text_primary'))
             }.alignItems(HorizontalAlign.Start).width('100%')
+
+            // 🎯 目标设置 (本地存储)
+            Row() {
+              Column({ space: 8 }) {
+                Text('目标步数').fontSize(14).fontColor($r('app.color.text_secondary'))
+                TextInput({ text: this.profile.targetSteps.toString(), placeholder: '10000' })
+                  .type(InputType.Number)
+                  .onChange((val) => this.profile.targetSteps = parseInt(val) || 0)
+                  .inputStyle()
+                  .fontColor($r('app.color.text_primary'))
+              }.layoutWeight(1).margin({ right: 10 })
+
+              Column({ space: 8 }) {
+                Text('目标热量 (kcal)').fontSize(14).fontColor($r('app.color.text_secondary'))
+                TextInput({ text: this.profile.targetCalories.toString(), placeholder: '500' })
+                  .type(InputType.Number)
+                  .onChange((val) => this.profile.targetCalories = parseInt(val) || 0)
+                  .inputStyle()
+                  .fontColor($r('app.color.text_primary'))
+              }.layoutWeight(1).margin({ left: 10 })
+            }.width('100%')
 
             // 年龄
             Column({ space: 8 }) {

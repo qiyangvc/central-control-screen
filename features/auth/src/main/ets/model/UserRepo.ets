@@ -16,6 +16,8 @@ export interface UserProfile {
   weight: number;
   age: number;
   gender: string;
+  targetSteps: number;
+  targetCalories: number;
 }
 
 export class UserRepo {
@@ -30,7 +32,9 @@ export class UserRepo {
         height: 0,
         weight: 0,
         age: 0,
-        gender: '未知'
+        gender: '未知',
+        targetSteps: 10000,
+        targetCalories: 500
       };
     }
     
@@ -66,6 +70,18 @@ export class UserRepo {
       age = profileRs.getLong(profileRs.getColumnIndex('age')) || 0;
       gender = profileRs.getString(profileRs.getColumnIndex('gender')) || '未知';
     }
+    // ⚡️ 读取目标设置 (如果列不存在会返回默认值或0，需处理)
+    let targetSteps = 10000;
+    let targetCalories = 500;
+    try {
+        if (profileRs.rowCount > 0) {
+            profileRs.goToFirstRow(); // Reset cursor just in case
+            const idxSteps = profileRs.getColumnIndex('target_steps');
+            const idxCals = profileRs.getColumnIndex('target_calories');
+            if (idxSteps !== -1) targetSteps = profileRs.getLong(idxSteps) || 10000;
+            if (idxCals !== -1) targetCalories = profileRs.getLong(idxCals) || 500;
+        }
+    } catch(e) {}
     profileRs.close();
 
     return {
@@ -75,7 +91,9 @@ export class UserRepo {
       height,
       weight,
       age,
-      gender
+      gender,
+      targetSteps,
+      targetCalories
     };
   }
 
@@ -105,6 +123,8 @@ export class UserRepo {
         'weight_kg': profile.weight,
         'age': profile.age,
         'gender': profile.gender,
+        'target_steps': profile.targetSteps,
+        'target_calories': profile.targetCalories,
         'updated_at': new Date().toISOString()
       };
 
@@ -117,6 +137,24 @@ export class UserRepo {
         await store.insert('user_profile', profileValues);
       }
       rs.close();
+
+      // ⚡️ 同步更新今日的 health_daily 目标
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = (today.getMonth() + 1).toString().padStart(2, '0');
+      const day = today.getDate().toString().padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+
+      // 尝试更新今日记录 (如果存在)
+      const healthValues: ValuesBucket = {
+        'steps_goal': profile.targetSteps,
+        'calories_goal': profile.targetCalories,
+        'updated_at': new Date().toISOString()
+      };
+      let healthPredicates = new relationalStore.RdbPredicates('health_daily');
+      healthPredicates.equalTo('user_id', profile.userId);
+      healthPredicates.equalTo('date', dateStr);
+      await store.update(healthValues, healthPredicates);
       
       return true;
     } catch (e) {

@@ -151,11 +151,50 @@ struct HomePage {
   @State posts: ForumPost[] = [];
   @State searchText: string = '';
   @State isLoading: boolean = false; // 加载状态
+  @State sortType: number = 0; // 0: 推荐, 1: 最新, 2: 最热, 3: 最多收藏
+  @State userTags: string[] = []; // 用户画像标签
+  private allPostsCache: ForumPost[] = []; // 本地缓存全量数据
 
   @StorageProp('refreshFeed') @Watch('loadData') refreshSignal: number = 0;
+  @StorageProp('postUpdate') @Watch('onPostUpdate') postUpdateSignal: Record<string, Object> = {};
+  // ⚡️ 修复：监听用户登录状态变化，登录后自动刷新列表以获取正确的点赞/收藏状态
+  @StorageLink('currentUserId') @Watch('onUserChange') currentUserId: number = 0;
+
+  async onUserChange() {
+    await this.fetchUserTags();
+    this.loadData();
+  }
+
+  onPostUpdate() {
+    const update = this.postUpdateSignal;
+    if (!update || !update['id']) return;
+
+    const id = update['id'] as number;
+    // 更新 posts 数组中的对应项
+    const index = this.posts.findIndex(p => p.id === id);
+    if (index !== -1) {
+      this.posts[index].like_count = update['like_count'] as number;
+      this.posts[index].is_liked = update['is_liked'] as number;
+      this.posts[index].fav_count = update['fav_count'] as number;
+      this.posts[index].is_faved = update['is_faved'] as number;
+      
+      // 强制刷新数组以触发UI更新
+      this.posts = [...this.posts];
+    }
+    
+    // 同时也更新缓存
+    const cacheIndex = this.allPostsCache.findIndex(p => p.id === id);
+    if (cacheIndex !== -1) {
+      this.allPostsCache[cacheIndex].like_count = update['like_count'] as number;
+      this.allPostsCache[cacheIndex].is_liked = update['is_liked'] as number;
+      this.allPostsCache[cacheIndex].fav_count = update['fav_count'] as number;
+      this.allPostsCache[cacheIndex].is_faved = update['is_faved'] as number;
+    }
+  }
 
   // ⚡️ 修复1：组件一加载就拉数据
-  aboutToAppear() {
+  async aboutToAppear() {
+    await this.fetchUserTags();
     this.loadData();
   }
 
@@ -163,6 +202,18 @@ struct HomePage {
   onPageShow() {
     if (this.posts.length === 0) {
       this.loadData();
+    }
+  }
+
+  // 获取用户标签用于推荐算法
+  async fetchUserTags() {
+    const uid = AppStorage.get<number>('currentUserId');
+    if (uid) {
+      const res = await ForumService.getProfile(uid);
+      if (res.success && res.data && res.data.info.health_tags) {
+         // 拆分标签：支持空格、逗号
+         this.userTags = res.data.info.health_tags.split(/[,，\s]+/).filter(t => t.trim() !== '');
+      }
     }
   }
 
@@ -175,29 +226,94 @@ struct HomePage {
     
     if (res.success && res.data) {
       // 2. 数据清洗
-      let allPosts = res.data.map(item => {
+      this.allPostsCache = res.data.map(item => {
         if (typeof item.images === 'string') {
           try { item.images = JSON.parse(item.images); } catch(e) { item.images = []; }
         }
         if (typeof item.tags === 'string') {
-          try { item.tags = JSON.parse(item.tags); } catch(e) { item.tags = []; }
+          try { 
+            item.tags = JSON.parse(item.tags); 
+          } catch(e) { 
+            // ⚡️ 修复：如果JSON解析失败，尝试按空格或逗号分割
+            if (typeof item.tags === 'string') {
+                item.tags = (item.tags as string).split(/[,，\s]+/).filter(t => t.trim() !== '');
+            } else {
+                item.tags = []; 
+            }
+          }
         }
         return item;
       });
-
-      // 3. 前端过滤
-      if (this.searchText && this.searchText.trim().length > 0) {
-        const keyword = this.searchText.toLowerCase().trim();
-        this.posts = allPosts.filter(post => {
-          const matchTitle = post.title && post.title.toLowerCase().includes(keyword);
-          const matchContent = post.content && post.content.toLowerCase().includes(keyword);
-          const matchTags = post.tags && Array.isArray(post.tags) && post.tags.some(tag => tag.toLowerCase().includes(keyword));
-          return matchTitle || matchContent || matchTags;
-        });
-      } else {
-        this.posts = allPosts;
-      }
+      
+      // 3. 刷新列表显示
+      this.refreshList();
     }
+  }
+
+  // 计算帖子与用户标签的匹配度
+  calculateMatchScore(post: ForumPost): number {
+    if (this.userTags.length === 0) return 0;
+    let score = 0;
+    
+    // 1. 标签匹配 (权重高)
+    if (post.tags && Array.isArray(post.tags)) {
+        post.tags.forEach(tag => {
+            // 模糊匹配：只要包含即可
+            if (this.userTags.some(uTag => tag.toLowerCase().includes(uTag.toLowerCase()) || uTag.toLowerCase().includes(tag.toLowerCase()))) {
+                score += 5; 
+            }
+        });
+    }
+
+    // 2. 标题和内容匹配 (权重低，作为补充)
+    // 这样即使帖子没有打标签，只要标题或内容里提到了相关词，也能被推荐
+    const fullText = ((post.title || '') + (post.content || '')).toLowerCase();
+    this.userTags.forEach(uTag => {
+        const t = uTag.toLowerCase();
+        if (fullText.includes(t)) {
+            score += 1;
+        }
+    });
+
+    return score;
+  }
+
+  // 统一处理过滤和排序
+  refreshList() {
+    let result = [...this.allPostsCache]; // 浅拷贝，避免影响原数组顺序
+
+    // A. 过滤
+    if (this.searchText && this.searchText.trim().length > 0) {
+      const keyword = this.searchText.toLowerCase().trim();
+      result = result.filter(post => {
+        const matchTitle = post.title && post.title.toLowerCase().includes(keyword);
+        const matchContent = post.content && post.content.toLowerCase().includes(keyword);
+        const matchTags = post.tags && Array.isArray(post.tags) && post.tags.some(tag => tag.toLowerCase().includes(keyword));
+        return matchTitle || matchContent || matchTags;
+      });
+    }
+
+    // B. 排序
+    if (this.sortType === 0) {
+      // 推荐：按标签匹配度倒序 -> ID倒序
+      result.sort((a, b) => {
+        const scoreA = this.calculateMatchScore(a);
+        const scoreB = this.calculateMatchScore(b);
+        if (scoreA !== scoreB) return scoreB - scoreA; // 分数高的在前
+        return b.id - a.id; // 分数相同，新的在前
+      });
+    } else if (this.sortType === 1) {
+      // 最新：按ID倒序
+      result.sort((a, b) => b.id - a.id);
+    } else if (this.sortType === 2) {
+      // 最热：按点赞数倒序
+      result.sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
+    } else if (this.sortType === 3) {
+      // 最多收藏：按收藏数倒序
+      result.sort((a, b) => (b.fav_count || 0) - (a.fav_count || 0));
+    }
+
+    this.posts = result;
   }
 
   // 🎨 颜色滤镜工具：让首页的小心心也能变红
@@ -215,9 +331,57 @@ struct HomePage {
       Row() {
         TextInput({ placeholder: '搜标题/标签...', text: this.searchText })
           .layoutWeight(1).backgroundColor($r('app.color.input_bg')).borderRadius(18).height(36)
-          .onChange(v => this.searchText = v).onSubmit(() => this.loadData())
-        Text("搜索").fontColor($r('app.color.text_primary')).margin({left: 10}).onClick(() => this.loadData())
+          .onChange(v => this.searchText = v).onSubmit(() => this.refreshList())
+        Text("搜索").fontColor($r('app.color.text_primary')).margin({left: 10}).onClick(() => this.refreshList())
       }.padding({left: 10, right: 10, top: 5, bottom: 5})
+
+      // 排序切换栏
+      Row() {
+        Text("推荐")
+          .fontSize(14)
+          .fontWeight(this.sortType === 0 ? FontWeight.Bold : FontWeight.Normal)
+          .fontColor(this.sortType === 0 ? $r('app.color.brand_red') : $r('app.color.text_secondary'))
+          .onClick(() => {
+            this.sortType = 0;
+            this.refreshList();
+          })
+
+        Divider().vertical(true).height(12).margin({left: 15, right: 15}).color('#E0E0E0')
+
+        Text("最新")
+          .fontSize(14)
+          .fontWeight(this.sortType === 1 ? FontWeight.Bold : FontWeight.Normal)
+          .fontColor(this.sortType === 1 ? $r('app.color.brand_red') : $r('app.color.text_secondary'))
+          .onClick(() => {
+            this.sortType = 1;
+            this.refreshList();
+          })
+        
+        Divider().vertical(true).height(12).margin({left: 15, right: 15}).color('#E0E0E0')
+        
+        Text("最热")
+          .fontSize(14)
+          .fontWeight(this.sortType === 2 ? FontWeight.Bold : FontWeight.Normal)
+          .fontColor(this.sortType === 2 ? $r('app.color.brand_red') : $r('app.color.text_secondary'))
+          .onClick(() => {
+            this.sortType = 2;
+            this.refreshList();
+          })
+
+        Divider().vertical(true).height(12).margin({left: 15, right: 15}).color('#E0E0E0')
+
+        Text("最多收藏")
+          .fontSize(14)
+          .fontWeight(this.sortType === 3 ? FontWeight.Bold : FontWeight.Normal)
+          .fontColor(this.sortType === 3 ? $r('app.color.brand_red') : $r('app.color.text_secondary'))
+          .onClick(() => {
+            this.sortType = 3;
+            this.refreshList();
+          })
+      }
+      .width('100%')
+      .padding({left: 15, bottom: 10})
+      .justifyContent(FlexAlign.Start)
 
       if (this.isLoading && this.posts.length === 0) {
         // 加载中提示
@@ -249,11 +413,18 @@ struct HomePage {
                   }.layoutWeight(1)
 
                   Row() {
-                    // ⚡️ 首页点赞变色 - 使用系统 Symbol 实现实心效果
+                    // ⚡️ 首页点赞变色
                     SymbolGlyph(item.is_liked ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
                       .fontSize(12)
                       .fontColor([item.is_liked ? Color.Red : $r('app.color.text_secondary')])
                     Text(` ${item.like_count}`).fontSize(10).fontColor($r('app.color.text_secondary'))
+
+                    // ⚡️ 首页收藏变色
+                    SymbolGlyph(item.is_faved ? $r('sys.symbol.star_fill') : $r('sys.symbol.star'))
+                      .fontSize(12)
+                      .fontColor([item.is_faved ? '#FFD700' : $r('app.color.text_secondary')])
+                      .margin({left: 5})
+                    Text(` ${item.fav_count || 0}`).fontSize(10).fontColor($r('app.color.text_secondary'))
                   }
                 }.padding({left: 8, right: 8, bottom: 8}).width('100%').justifyContent(FlexAlign.SpaceBetween)
               }
@@ -312,17 +483,47 @@ struct PostDetailView {
   async toggleLike() {
     const uid = AppStorage.get<number>('currentUserId');
     if (!uid) { promptAction.showToast({message: '请先登录'}); return; }
+    
+    // ⚡️ 乐观更新：立即更新UI
     this.isLiked = !this.isLiked;
+    if (this.detail && this.detail.post) {
+        this.detail.post.like_count = (this.detail.post.like_count || 0) + (this.isLiked ? 1 : -1);
+        this.detail.post.is_liked = this.isLiked ? 1 : 0;
+        
+        // ⚡️ 实时同步：通知首页更新
+        AppStorage.setOrCreate('postUpdate', { 
+            id: this.postId, 
+            like_count: this.detail.post.like_count, 
+            is_liked: this.detail.post.is_liked,
+            fav_count: this.detail.post.fav_count,
+            is_faved: this.detail.post.is_faved
+        });
+    }
+
     await ForumService.likePost(this.postId, uid);
-    AppStorage.setOrCreate('refreshFeed', Date.now());
   }
 
   async toggleFav() {
     const uid = AppStorage.get<number>('currentUserId');
     if (!uid) { promptAction.showToast({message: '请先登录'}); return; }
+    
+    // ⚡️ 乐观更新：立即更新UI
     this.isFaved = !this.isFaved;
+    if (this.detail && this.detail.post) {
+        this.detail.post.fav_count = (this.detail.post.fav_count || 0) + (this.isFaved ? 1 : -1);
+        this.detail.post.is_faved = this.isFaved ? 1 : 0;
+
+        // ⚡️ 实时同步：通知首页更新
+        AppStorage.setOrCreate('postUpdate', { 
+            id: this.postId, 
+            like_count: this.detail.post.like_count, 
+            is_liked: this.detail.post.is_liked,
+            fav_count: this.detail.post.fav_count,
+            is_faved: this.detail.post.is_faved
+        });
+    }
+
     await ForumService.favPost(this.postId, uid);
-    AppStorage.setOrCreate('refreshFeed', Date.now());
   }
 
   async deletePost() {
@@ -470,19 +671,27 @@ struct PostDetailView {
             TextInput({ placeholder: '说点什么...', text: this.commentText }).layoutWeight(1).backgroundColor('#F5F5F5').borderRadius(20).onChange(v => this.commentText = v).onSubmit(() => this.sendComment())
             Text("发送").fontColor('#007DFF').margin({left: 10}).onClick(() => this.sendComment())
 
-            // ❤️ 点赞 - 使用系统 Symbol
-            SymbolGlyph(this.isLiked ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
-              .fontSize(28)
-              .fontColor([this.isLiked ? Color.Red : '#999'])
-              .margin({left: 15})
-              .onClick(() => this.toggleLike())
+            // ❤️ 点赞
+            Row() {
+              SymbolGlyph(this.isLiked ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
+                .fontSize(24)
+                .fontColor([this.isLiked ? Color.Red : '#999'])
+              Text((this.detail?.post.like_count || 0).toString())
+                .fontSize(12).fontColor('#666').margin({left: 4})
+            }
+            .margin({left: 15})
+            .onClick(() => this.toggleLike())
 
-            // 💛 收藏 - 使用系统 Symbol
-            SymbolGlyph(this.isFaved ? $r('sys.symbol.star_fill') : $r('sys.symbol.star'))
-              .fontSize(28)
-              .fontColor([this.isFaved ? '#FFD700' : '#999'])
-              .margin({left: 15})
-              .onClick(() => this.toggleFav())
+            // 💛 收藏
+            Row() {
+              SymbolGlyph(this.isFaved ? $r('sys.symbol.star_fill') : $r('sys.symbol.star'))
+                .fontSize(24)
+                .fontColor([this.isFaved ? '#FFD700' : '#999'])
+              Text((this.detail?.post.fav_count || 0).toString())
+                .fontSize(12).fontColor('#666').margin({left: 4})
+            }
+            .margin({left: 15})
+            .onClick(() => this.toggleFav())
 
           }.padding(10).border({width: {top: 1}, color: '#eee'})
         }
@@ -502,18 +711,58 @@ struct ProfileView {
   @State errorMsg: string = '';
 
   @StorageProp('refreshFeed') @Watch('loadProfile') refreshSignal: number = 0;
+  @StorageProp('postUpdate') @Watch('onPostUpdate') postUpdateSignal: Record<string, Object> = {};
 
-  dialogController: CustomDialogController = new CustomDialogController({
-    builder: EditProfileDialog({
-      nickname: this.profile?.info.nickname,
-      age: this.profile?.info.age,
-      weight: this.profile?.info.weight,
-      tags: this.profile?.info.health_tags,
-      userId: this.userId,
-      confirm: () => { this.loadProfile(); }
-    }),
-    autoCancel: true
-  })
+  onPostUpdate() {
+    const update = this.postUpdateSignal;
+    if (!update || !update['id'] || !this.profile) return;
+
+    const id = update['id'] as number;
+    
+    const updateList = (list: ForumPost[]) => {
+      const index = list.findIndex(p => p.id === id);
+      if (index !== -1) {
+        list[index].like_count = update['like_count'] as number;
+        list[index].is_liked = update['is_liked'] as number;
+        list[index].fav_count = update['fav_count'] as number;
+        list[index].is_faved = update['is_faved'] as number;
+        return true;
+      }
+      return false;
+    };
+
+    let changed = false;
+    if (updateList(this.profile.works)) changed = true;
+    if (updateList(this.profile.likes)) changed = true;
+    if (updateList(this.profile.favs)) changed = true;
+
+    if (changed && this.profile) {
+        // 强制刷新对象以触发UI更新
+        this.profile = {
+            info: this.profile.info,
+            works: this.profile.works,
+            likes: this.profile.likes,
+            favs: this.profile.favs
+        };
+    }
+  }
+
+  dialogController: CustomDialogController | null = null;
+
+  openEditDialog() {
+    this.dialogController = new CustomDialogController({
+      builder: EditProfileDialog({
+        nickname: this.profile?.info.nickname || '',
+        age: this.profile?.info.age || 0,
+        weight: this.profile?.info.weight || 0,
+        tags: this.profile?.info.health_tags || '',
+        userId: this.userId,
+        confirm: () => { this.loadProfile(); }
+      }),
+      autoCancel: true
+    })
+    this.dialogController.open()
+  }
 
   // ⚡️ 修复：主动加载
   aboutToAppear() { this.loadProfile(); }
@@ -566,7 +815,7 @@ struct ProfileView {
             }.alignItems(HorizontalAlign.Start).margin({left: 20})
             Blank()
             if (this.isSelf) {
-              Button("编辑资料").height(28).fontSize(12).backgroundColor('#eee').fontColor('#333').onClick(() => this.dialogController.open())
+              Button("编辑资料").height(28).fontSize(12).backgroundColor('#eee').fontColor('#333').onClick(() => this.openEditDialog())
             }
           }.padding(20).width('100%')
 
@@ -616,10 +865,24 @@ struct EditProfileDialog {
   confirm: () => void = () => {}
 
   async save() {
-    const params = `user_id=${this.userId}&nickname=${this.nickname}&age=${this.age}&weight=${this.weight}&tags=${this.tags}`;
-    await ForumService.updateProfile(params);
-    this.confirm();
-    this.controller.close();
+    // ⚡️ 修复：对参数进行 URL 编码，防止特殊字符导致解析失败
+    // 同时发送 tags 和 health_tags 以兼容后端不同字段名
+    const params = `user_id=${this.userId}` +
+                   `&nickname=${encodeURIComponent(this.nickname)}` +
+                   `&age=${this.age}` +
+                   `&weight=${this.weight}` +
+                   `&health_tags=${encodeURIComponent(this.tags)}` +
+                   `&tags=${encodeURIComponent(this.tags)}`; // 双重保险
+    
+    console.info(`[EditProfile] Saving: ${params}`);
+    const res = await ForumService.updateProfile(params);
+    if (res.success) {
+      promptAction.showToast({message: '保存成功'});
+      this.confirm();
+      this.controller.close();
+    } else {
+      promptAction.showToast({message: res.message || '保存失败'});
+    }
   }
 
   async changeAvatar() {
@@ -845,6 +1108,27 @@ struct SearchPage {
   @State searchResults: ForumPost[] = [];
   @State isLoading: boolean = false;
 
+  // ⚡️ 修复：监听全局刷新信号，实现数据实时同步
+  @StorageProp('refreshFeed') @Watch('doSearch') refreshSignal: number = 0;
+  @StorageProp('postUpdate') @Watch('onPostUpdate') postUpdateSignal: Record<string, Object> = {};
+  // ⚡️ 修复：监听用户登录状态变化
+  @StorageLink('currentUserId') @Watch('doSearch') currentUserId: number = 0;
+
+  onPostUpdate() {
+    const update = this.postUpdateSignal;
+    if (!update || !update['id']) return;
+
+    const id = update['id'] as number;
+    const index = this.searchResults.findIndex(p => p.id === id);
+    if (index !== -1) {
+      this.searchResults[index].like_count = update['like_count'] as number;
+      this.searchResults[index].is_liked = update['is_liked'] as number;
+      this.searchResults[index].fav_count = update['fav_count'] as number;
+      this.searchResults[index].is_faved = update['is_faved'] as number;
+      this.searchResults = [...this.searchResults];
+    }
+  }
+
   aboutToAppear() {
     if (this.keyword) {
       this.doSearch();
@@ -929,9 +1213,17 @@ struct SearchPage {
                       Image(item.author_avatar ? `${DOMAIN}${item.author_avatar}` : $r('app.media.app_icon'))
                         .width(20).height(20).borderRadius(10)
                       Text(item.author_name).fontSize(12).fontColor($r('app.color.text_secondary')).margin({left: 5})
-                      Blank()
-                      SymbolGlyph($r('sys.symbol.heart')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+                      SymbolGlyph(item.is_liked ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
+                        .fontSize(14)
+                        .fontColor([item.is_liked ? Color.Red : $r('app.color.text_secondary')])
                       Text(item.like_count.toString()).fontSize(12).fontColor($r('app.color.text_secondary')).margin({left: 2})
+
+                      Blank()
+
+                      SymbolGlyph(item.is_faved ? $r('sys.symbol.star_fill') : $r('sys.symbol.star'))
+                        .fontSize(14)
+                        .fontColor([item.is_faved ? '#FFD700' : $r('app.color.text_secondary')])
+                      Text((item.fav_count || 0).toString()).fontSize(12).fontColor($r('app.color.text_secondary')).margin({left: 2})
                     }.width('100%').margin({top: 10})
                   }.layoutWeight(1).height(100).padding({left: 10}).justifyContent(FlexAlign.SpaceBetween).alignItems(HorizontalAlign.Start)
                 }

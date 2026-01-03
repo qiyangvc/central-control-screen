@@ -24,6 +24,8 @@ const DDL: string[] = [
     height_cm REAL,
     weight_kg REAL,
     body_fat_pct REAL,
+    target_steps INTEGER DEFAULT 10000,
+    target_calories INTEGER DEFAULT 500,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
     FOREIGN KEY(user_id) REFERENCES user(id) ON DELETE CASCADE
@@ -161,6 +163,10 @@ export class AppDatabase {
       try { await AppDatabase.store.executeSql('ALTER TABLE doctor ADD COLUMN title TEXT'); } catch (e) {}
       try { await AppDatabase.store.executeSql('ALTER TABLE doctor ADD COLUMN specialty TEXT'); } catch (e) {}
       try { await AppDatabase.store.executeSql('ALTER TABLE doctor ADD COLUMN fee REAL DEFAULT 0'); } catch (e) {}
+
+      // ⚡️ 新增：用户目标设置字段
+      try { await AppDatabase.store.executeSql('ALTER TABLE user_profile ADD COLUMN target_steps INTEGER DEFAULT 10000'); } catch (e) {}
+      try { await AppDatabase.store.executeSql('ALTER TABLE user_profile ADD COLUMN target_calories INTEGER DEFAULT 500'); } catch (e) {}
 
       // 数据库升级逻辑：尝试添加 isAdmin 字段
       try {

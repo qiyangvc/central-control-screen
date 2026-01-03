@@ -53,6 +53,7 @@ export struct LoginPage {
 
           // 1. 保存用户信息到全局存储 (方便其他页面使用)
           AppStorage.setOrCreate('currentUser', user);
+          AppStorage.setOrCreate('currentUserId', user.id);
 
           // 2. 跳转到主页 (使用 replaceUrl 销毁当前登录页，防止用户点返回键回来)
           router.replaceUrl({ url: 'pages/Index' });
