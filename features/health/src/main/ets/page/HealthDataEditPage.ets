@@ -208,7 +208,7 @@ export struct HealthDataEditPage {
   showDatePicker() {
     DatePickerDialog.show({
       start: new Date("2020-01-01"),
-      end: new Date("2100-12-31"),
+      end: new Date(), // 限制只能选择今天及以前的日期
       selected: this.selectedDate,
       onAccept: (value: DatePickerResult) => {
         const newDate = new Date(value.year!, value.month!, value.day!);
