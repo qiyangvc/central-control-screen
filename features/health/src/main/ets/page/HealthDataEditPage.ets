@@ -124,19 +124,28 @@ export struct HealthDataEditPage {
     try {
       const userId = HealthDataService.getCurrentUserId();
 
-      // 构建数据对象
-      let record = new HealthRecord();
-      // 初始化 (如果是修改，后端会根据 date 和 userId 找到旧记录进行更新)
-      record.initialize(this.dateStr, userId);
+      // 1. 先尝试获取当天的现有数据，避免覆盖未修改的字段
+      let record = await HealthDataService.getHealthDataByDate(this.dateStr);
+      
+      if (!record) {
+        // 如果没有，则创建新记录
+        record = new HealthRecord();
+        record.initialize(this.dateStr, userId);
+      }
 
-      // 填充数据 (简单的非空判断)
+      // 2. 填充数据 (仅当输入框有值时才更新，否则保留原值)
+      // 注意：如果用户清空了输入框，这里可能需要特殊处理，目前逻辑是保留原值
       if (this.steps) record.stepsCurrent = parseInt(this.steps);
       if (this.calories) record.caloriesCurrent = parseInt(this.calories);
       if (this.distance) record.stepsDistance = parseFloat(this.distance);
 
       if (this.deepSleep) record.sleepDeep = parseFloat(this.deepSleep);
       if (this.lightSleep) record.sleepLight = parseFloat(this.lightSleep);
-      record.sleepTotal = record.sleepDeep + record.sleepLight; // 自动计算总睡眠
+      
+      // 重新计算总睡眠 (如果修改了深睡或浅睡)
+      if (this.deepSleep || this.lightSleep) {
+         record.sleepTotal = record.sleepDeep + record.sleepLight;
+      }
 
       if (this.heartRate) record.heartRate = parseInt(this.heartRate);
       if (this.stress) record.stressValue = parseInt(this.stress);
@@ -147,6 +156,19 @@ export struct HealthDataEditPage {
 
       // 调用后端保存接口
       await HealthDataService.saveHealthData(record);
+
+      // 核心修复：保存成功后，立即通知全局“健康数据已更新”
+      // 这样 WellnessPage (居家康养) 和 HealthSportsPage (运动健康) 都能监听到并自动刷新
+      AppStorage.setOrCreate('HealthDataLastUpdate', Date.now());
+
+      // === 终极修复：直接更新 AppStorage 中的气泡显示数据 ===
+      // 这样 WellnessPage 即使不读数据库，也能立即显示最新值
+      // 注意：这里使用 record 中的值，因为 record 已经是合并后的完整数据
+      AppStorage.setOrCreate('Health_Bubble_Temp', (record.temperature || 0).toFixed(1));
+      AppStorage.setOrCreate('Health_Bubble_Heart', (record.heartRate || 0).toString());
+      AppStorage.setOrCreate('Health_Bubble_Spo2', (record.spo2 || 0).toString());
+      AppStorage.setOrCreate('Health_Bubble_BP', `${record.bpSystolic || 0}/${record.bpDiastolic || 0}`);
+      AppStorage.setOrCreate('Health_Bubble_Stress', (record.stressValue || 0).toString());
 
       promptAction.showToast({ message: this.isDataExist ? '修改成功！' : '新增成功！' });
 

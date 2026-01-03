@@ -28,6 +28,9 @@ interface UISportsData {
 @Entry({ routeName: 'HealthSportsPage' })
 @Component
 export struct HealthSportsPage {
+  // 监听全局数据更新事件 (由 HealthDataEditPage 触发)
+  @StorageProp('HealthDataLastUpdate') @Watch('onHealthDataUpdate') lastUpdate: number = 0;
+
   @State ui: UISportsData = {
     stepsStr: '--',
     stepsPercent: 0,
@@ -49,6 +52,14 @@ export struct HealthSportsPage {
     stepsProgressStr: '0/10000',
     kcalProgressStr: '0/500'
   };
+
+  // 当监听到数据更新时，自动重新加载数据
+  onHealthDataUpdate() {
+    console.info('HealthSportsPage: 监听到数据更新通知，正在刷新...');
+    setTimeout(() => {
+      this.loadData();
+    }, 100);
+  }
 
   async aboutToAppear() {
     // 初始化数据库服务
@@ -175,7 +186,7 @@ export struct HealthSportsPage {
           })
         }
         .width('100%')
-        .padding({ top: 40, left: 20, right: 20 }) // 确保 right padding 足够
+        .padding({ top: 40, left: 20, right: 20, bottom: 10 }) // 确保 right padding 足够
         .alignItems(VerticalAlign.Center)
 
         // =========================================================

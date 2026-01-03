@@ -11,7 +11,8 @@ export class HealthSportsViewModel {
   }
 
   async getTodaySports(): Promise<TodaySportsData> {
-    const record = await HealthDataService.getLatestSportsData();
+    const today = HealthDataService.formatDate(new Date());
+    const record = await HealthDataService.getHealthDataByDate(today);
     const result = new TodaySportsData();
 
     if (record) {
@@ -26,7 +27,8 @@ export class HealthSportsViewModel {
   }
 
   async getHealthData(): Promise<HealthData> {
-    const record = await HealthDataService.getLatestHealthData();
+    const today = HealthDataService.formatDate(new Date());
+    const record = await HealthDataService.getHealthDataByDate(today);
     const result = new HealthData();
 
     if (record) {
@@ -52,8 +54,9 @@ export class HealthSportsViewModel {
 
   async loadDataFromDatabase(): Promise<DatabaseResult> {
     try {
-      const sportsRecord = await HealthDataService.getLatestSportsData();
-      const healthRecord = await HealthDataService.getLatestHealthData();
+      const today = HealthDataService.formatDate(new Date());
+      const sportsRecord = await HealthDataService.getHealthDataByDate(today);
+      const healthRecord = await HealthDataService.getHealthDataByDate(today);
       console.info('从数据库加载数据成功');
 
       const result = new DatabaseResult();

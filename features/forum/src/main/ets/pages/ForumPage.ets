@@ -168,11 +168,14 @@ struct HomePage {
 
   async loadData() {
     this.isLoading = true;
-    const res = await ForumService.getFeed(this.searchText);
+    // 临时方案：前端过滤，确保Tag搜索生效 (因为后端搜索可能不包含Tag)
+    // 1. 获取所有数据 (传空字符串)
+    const res = await ForumService.getFeed(""); 
     this.isLoading = false;
+    
     if (res.success && res.data) {
-      // ⚡️ 修复：防止 images/tags 字段是字符串（后端未解析 JSON 的情况）
-      this.posts = res.data.map(item => {
+      // 2. 数据清洗
+      let allPosts = res.data.map(item => {
         if (typeof item.images === 'string') {
           try { item.images = JSON.parse(item.images); } catch(e) { item.images = []; }
         }
@@ -181,6 +184,19 @@ struct HomePage {
         }
         return item;
       });
+
+      // 3. 前端过滤
+      if (this.searchText && this.searchText.trim().length > 0) {
+        const keyword = this.searchText.toLowerCase().trim();
+        this.posts = allPosts.filter(post => {
+          const matchTitle = post.title && post.title.toLowerCase().includes(keyword);
+          const matchContent = post.content && post.content.toLowerCase().includes(keyword);
+          const matchTags = post.tags && Array.isArray(post.tags) && post.tags.some(tag => tag.toLowerCase().includes(keyword));
+          return matchTitle || matchContent || matchTags;
+        });
+      } else {
+        this.posts = allPosts;
+      }
     }
   }
 
@@ -739,10 +755,11 @@ struct PublishView {
           .backgroundColor(Color.Transparent)
           .onChange(v=>this.content=v)
         TextInput({ placeholder: '#标签 (用空格分隔)', text: this.tags })
-          .margin(10)
+          .margin({top: 10, left: 10, right: 10})
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.input_bg'))
           .onChange(v=>this.tags=v)
+        Text("提示：tag会自动加上#").fontSize(12).fontColor($r('app.color.text_secondary')).margin({left: 15, bottom: 10})
         
         // Image Grid
         Grid() {
@@ -836,10 +853,12 @@ struct SearchPage {
 
   async doSearch() {
     this.isLoading = true;
-    const res = await ForumService.getFeed(this.keyword);
+    // ⚡️ 修复：使用前端过滤，确保Tag搜索生效 (与首页逻辑保持一致)
+    // 1. 获取所有数据 (传空字符串)
+    const res = await ForumService.getFeed("");
     if (res.success && res.data) {
-      // Parse images and tags
-      this.searchResults = res.data.map(item => {
+      // 2. 数据清洗
+      let allPosts = res.data.map(item => {
         if (typeof item.images === 'string') {
             try { item.images = JSON.parse(item.images); } catch(e) { item.images = []; }
         }
@@ -848,6 +867,19 @@ struct SearchPage {
         }
         return item;
       });
+
+      // 3. 前端过滤
+      if (this.keyword && this.keyword.trim().length > 0) {
+        const k = this.keyword.toLowerCase().trim();
+        this.searchResults = allPosts.filter(post => {
+          const matchTitle = post.title && post.title.toLowerCase().includes(k);
+          const matchContent = post.content && post.content.toLowerCase().includes(k);
+          const matchTags = post.tags && Array.isArray(post.tags) && post.tags.some(tag => tag.toLowerCase().includes(k));
+          return matchTitle || matchContent || matchTags;
+        });
+      } else {
+        this.searchResults = allPosts;
+      }
     } else {
       this.searchResults = [];
     }

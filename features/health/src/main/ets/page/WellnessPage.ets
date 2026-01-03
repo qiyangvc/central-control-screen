@@ -14,6 +14,10 @@ export struct WellnessPage {
   @State isDarkMode: boolean = false;
   @State healthData: HealthData = new HealthData();
   @State currentBreakpoint: string = 'xs'; // 默认设为 xs，防止初始闪烁
+  
+  // 监听全局数据更新事件 (由 HealthDataEditPage 触发)
+  @StorageProp('HealthDataLastUpdate') @Watch('onHealthDataUpdate') lastUpdate: number = 0;
+
   private viewModel: HealthSportsViewModel = new HealthSportsViewModel();
   
   // 用户信息状态
@@ -25,6 +29,22 @@ export struct WellnessPage {
   @State userWeight: number = 0;
   @State userBMI: number = 0;
 
+  // === 扁平化状态变量 (使用 @StorageLink 实现跨页面双向同步) ===
+  @StorageLink('Health_Bubble_Temp') tempVal: string = '--';
+  @StorageLink('Health_Bubble_Heart') heartVal: string = '--';
+  @StorageLink('Health_Bubble_Spo2') spo2Val: string = '--';
+  @StorageLink('Health_Bubble_BP') bpVal: string = '--/--';
+  @StorageLink('Health_Bubble_Stress') stressVal: string = '--';
+
+  // 强制刷新 UI 的标记
+  @State uiRefresher: number = 0;
+
+  // 当监听到数据更新时，自动重新加载数据
+  onHealthDataUpdate() {
+    console.info('WellnessPage: 监听到数据更新通知，无需操作，AppStorage已自动同步');
+    // 移除 loadHealthData 调用，完全信任 AppStorage 的直接更新
+  }
+
   aboutToAppear() {
     // 同步系统当前的深浅模式状态
     let colorMode = this.context.config.colorMode;
@@ -33,6 +53,16 @@ export struct WellnessPage {
   }
 
   onPageShow() {
+    console.info('WellnessPage: onPageShow triggered');
+    
+    // 如果最近2秒内有过数据更新，则跳过数据库加载，防止旧数据覆盖新数据
+    const now = Date.now();
+    if (now - this.lastUpdate < 2000) {
+      console.info('WellnessPage: 检测到最近有数据更新，跳过数据库读取，使用 AppStorage 缓存');
+      this.loadUserProfile();
+      return;
+    }
+
     this.loadHealthData();
     this.loadUserProfile();
   }
@@ -83,6 +113,15 @@ export struct WellnessPage {
       }
       
       this.healthData = data;
+      
+      // 更新扁平化状态 (同时更新 AppStorage，确保下次进入时有缓存)
+      this.tempVal = (data.temperature.value || 0).toFixed(1);
+      this.heartVal = (data.heart.heartRate || 0).toString();
+      this.spo2Val = (data.bloodOxygen.spo2 || 0).toString();
+      this.bpVal = `${data.bloodPressure.systolic || 0}/${data.bloodPressure.diastolic || 0}`;
+      this.stressVal = (data.stress.value || 0).toString();
+
+      this.uiRefresher++; // 强制触发 UI 更新
       console.info('WellnessPage: 数据加载完成', JSON.stringify(this.healthData));
 
     } catch (error) {
@@ -210,11 +249,11 @@ export struct WellnessPage {
                 Column({ space: 15 }) {
                   // 1. 健康数据列表 (使用 Column 替代 List 以避免嵌套滚动冲突)
                   Column({ space: 10 }) {
-                    this.HealthListItem("体温", `${this.healthData.temperature.value}°C`, $r('app.media.icon_body_temperature'))
-                    this.HealthListItem("心率", `${this.healthData.heart.heartRate}次/min`, $r('app.media.icon_heart_rate'))
-                    this.HealthListItem("血氧", `${this.healthData.bloodOxygen.spo2}%`, $r('app.media.icon_blood_oxygen'))
-                    this.HealthListItem("血压", `${this.healthData.bloodPressure.systolic}/${this.healthData.bloodPressure.diastolic}`, $r('app.media.icon_pressure'))
-                    this.HealthListItem("压力", `${this.healthData.stress.value}`, $r('app.media.heart_waves_fill'))
+                    this.HealthListItem("体温", `${this.tempVal}°C`, $r('app.media.icon_body_temperature'))
+                    this.HealthListItem("心率", `${this.heartVal}次/min`, $r('app.media.icon_heart_rate'))
+                    this.HealthListItem("血氧", `${this.spo2Val}%`, $r('app.media.icon_blood_oxygen'))
+                    this.HealthListItem("血压", this.bpVal, $r('app.media.icon_pressure'))
+                    this.HealthListItem("压力", this.stressVal, $r('app.media.heart_waves_fill'))
                   }
                   .width('100%')
                   // .height(320) // 移除固定高度，让其自适应
@@ -284,15 +323,15 @@ export struct WellnessPage {
                   // A. 左侧：5个悬浮气泡 (替代3D模型)
                   Stack() {
                     // 气泡1：体温 (左上)
-                    this.HealthBubble(`${this.healthData.temperature.value}°C`, "体温", -110, -100)
+                    this.HealthBubble(`${this.tempVal}°C`, "体温", -110, -100)
                     // 气泡2：心率 (右上)
-                    this.HealthBubble(`${this.healthData.heart.heartRate}次`, "心率/min", 90, -110)
+                    this.HealthBubble(`${this.heartVal}次`, "心率/min", 90, -110)
                     // 气泡3：血糖 (左中)
-                    this.HealthBubble(`${this.healthData.bloodOxygen.spo2}%`, "血氧", -130, 20)
+                    this.HealthBubble(`${this.spo2Val}%`, "血氧", -130, 20)
                     // 气泡4：血氧 (右中)
-                    this.HealthBubble(`${this.healthData.bloodPressure.systolic}/${this.healthData.bloodPressure.diastolic}`, "血压", 110, 40)
+                    this.HealthBubble(this.bpVal, "血压", 110, 40)
                     // 气泡5：血压 (底部)
-                    this.HealthBubble(`${this.healthData.stress.value}`, "压力", -20, 130)
+                    this.HealthBubble(this.stressVal, "压力", -20, 130)
                   }
                   .layoutWeight(1.5)
                   .height('100%')
@@ -453,6 +492,7 @@ export struct WellnessPage {
             .height(this.currentBreakpoint === 'xs' ? undefined : '100%')
           }
         }
+        .key('GridRow_' + this.uiRefresher) // 强制 GridRow 重新渲染
         .onBreakpointChange((breakpoint: string) => {
           this.currentBreakpoint = breakpoint;
         })
@@ -492,7 +532,7 @@ export struct WellnessPage {
   @Builder HealthBubble(value: string, label: string, x: number, y: number) {
     Column() {
       // 增加判空显示，如果为0或空则显示 --
-      Text((value === '0' || value === '0°C' || value === '0%' || value === '0/0') ? '--' : value)
+      Text((value === '0' || value === '0.0°C' || value === '0%' || value === '0/0') ? '--' : value)
         .fontSize(20)
         .fontColor($r('app.color.text_cyan'))
         .fontWeight(FontWeight.Bold)
