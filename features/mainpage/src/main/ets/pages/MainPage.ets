@@ -79,9 +79,9 @@ export struct MainPage {
     { key: 'btn_full_temp', icon: 'full_temp' },
     { key: 'btn_dehumidify', icon: 'dehumidify' },
     { key: 'btn_ventilation', icon: 'ventilation' },
-    { key: 'btn_more_scenes', icon: 'foreground' },
+    { key: 'btn_more_scenes', icon: 'more' },
     { key: 'btn_one_key_call', icon: 'ventilation' },
-    { key: 'btn_sport_health', icon: 'foreground' }
+    { key: 'btn_sport_health', icon: 'running' }
   ];
 
   async aboutToAppear() {
